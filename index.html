@@ -131,8 +131,6 @@ function rateSBtoSH(){
  return fx[sh]/fx[sb];
 }
 
-const ceil2=x=>Math.ceil((Number(x)-1e-9)*100)/100;
-
 function invoiceTotalFromUnit(unitPrice, qty, currency){
   // Business rule: round unit selling price UP to 2 decimals BEFORE multiplying by quantity.
   const roundedUnit=ceil2(unitPrice);

@@ -120,9 +120,18 @@ let CASE=1;
 const $=id=>document.getElementById(id);
 const n=id=>Number($(id).value||0);
 const symbols={USD:'$',EUR:'€',GBP:'£',DKK:'kr',SEK:'kr',PLN:'zł'};
+// Two rounding modes, used deliberately in different places:
+// - ceil2: rounds UP to the cent. Used for anything that is a SALE PRICE / floor being
+//   set on the platform (StubHub Intl unit price, Minimum CP, StubHub Intl Invoice Total).
+//   Confirmed by the spec's business intent (never let a price/floor be under-protective).
+// - round2: normal rounding to the nearest cent. Used once a sale amount is already fixed
+//   and is being SPLIT between parties (Broker Invoice, Fee Invoice, SB Unit Amount write-back).
+//   Confirmed against a real production invoice: SkyBox 28,751.29 -> Broker 27,888.75
+//   (28751.29 * 0.97 = 27888.7513, which normal-rounds to .75, NOT ceil-rounds to .76).
 const ceil2=x=>Math.ceil((Number(x)-1e-9)*100)/100;
+const round2=x=>Math.round((Number(x)+1e-9)*100)/100;
 const money=(x,c)=>{
-  const rounded=ceil2(x);
+  const rounded=round2(x); // values are already rounded appropriately upstream; this just formats safely
   return symbols[c]+rounded.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 };
 
@@ -132,7 +141,9 @@ function rateSBtoSH(){
 }
 
 function invoiceTotalFromUnit(unitPrice, qty, currency){
-  // Business rule: round unit selling price UP to 2 decimals BEFORE multiplying by quantity.
+  // Business rule: unit selling price is a PRICE -> round UP to cents before multiplying
+  // by quantity, and round the resulting total UP too (it's still the sale price/floor,
+  // not yet a money-split calculation).
   const roundedUnit=ceil2(unitPrice);
   const total=ceil2(roundedUnit*qty);
   return {unit:roundedUnit,total:total,currency:currency};
@@ -150,43 +161,70 @@ function selectCase(c){
  ].map(t=>'<span class="badge '+(t.includes('NO')||t.includes('OFF')?'off':'')+'">'+t+'</span>').join('');
  calculate();
 }
-function calculate(){
+
+/* Shared calculation core — used identically by the Results panel and the QA checks table,
+   so the two can never disagree again. Every monetary figure that would be "created" as a
+   real invoice/unit price is rounded to 2 decimals immediately, then all further math is
+   done on that rounded value (mirrors what actually happens with real invoices). */
+function computeCase(){
  const d=C[CASE], unit=n('unit'), list=n('list'), qty=n('qty'), conv=n('conv'), fee=n('fee');
  const fx=FX();
- const sb=$('sb').value, sh=$('sh').value, same=sb===sh, cpRaw=$('cp').value.trim(), hasCP=cpRaw!=='', cp=n('cp');
- const r=rateSBtoSH(), converted=unit*r, withConv=converted*(same?1:1+conv/100);
- const minCP=d.f?withConv*100/(100-fee):withConv;
- const listSH=list*fx[sh];
+ const sb=$('sb').value, sh=$('sh').value, same=sb===sh, cpRaw=$('cp').value.trim(), hasCP=cpRaw!=='', cp=round2(n('cp'));
+ const r=rateSBtoSH();
+ const converted=unit*r;
+ const withConv=converted*(same?1:1+conv/100);
+ // Minimum CP: per the spec's own worked example (Unit=100, fee=3% -> 103.09, NOT 103.10),
+ // this uses NORMAL rounding, in every case (it's the same fee-gross-up formula as the
+ // "StubHub Intl Price without CP" row in cases 4-7, so it must round the same way).
+ const minCP=round2(d.f?withConv*100/(100-fee):withConv);
+ // List price converted to StubHub Intl currency (cases 1-3 ONLY) is a different formula,
+ // confirmed by the user's own real example to round UP (List 39870 USD -> total 69,003.10,
+ // not 69,003.08/.09).
+ const listSH=ceil2(list*fx[sh]);
+
  let shUnit,shTotal,broker,feeTotal=0,updated='—',brokerCurrency=sb;
+
  if(CASE<=3){
-   shUnit=ceil2(hasCP?cp:listSH);
-   shTotal=invoiceTotalFromUnit(shUnit,qty,sh).total;
-   broker=unit*qty; brokerCurrency=sb;
+   shUnit=hasCP?cp:listSH;               // price -> already rounded up (listSH) or user-set (CP)
+   shTotal=invoiceTotalFromUnit(shUnit,qty,sh).total; // total sale price -> round UP (same List Price formula)
+   broker=round2(unit*qty);              // money actually owed to broker -> normal rounding
+   brokerCurrency=sb;
  }else{
-   shUnit=hasCP?cp:withConv*(d.f?100/(100-fee):1);
-   shTotal=shUnit*qty;
+   shUnit=hasCP?cp:round2(withConv*(d.f?100/(100-fee):1)); // fee-gross-up price -> NORMAL rounding (matches spec's 103.09 example)
+   shTotal=round2(shUnit*qty);                                // total sale price -> NORMAL rounding
    if(d.f){
-     feeTotal=shTotal*fee/100;
+     feeTotal=round2(shTotal*fee/100);        // money split -> normal rounding
      broker=shTotal*(100-fee)/100;
-     if(!same) broker*=1/r; // convert SH -> SB
+     if(!same) broker=broker/r;               // convert SH -> SB
+     broker=round2(broker);                   // money split -> normal rounding
      brokerCurrency=same?sh:sb;
    }else{
      broker=hasCP?shTotal:shTotal/(same?1:1+conv/100);
+     broker=round2(broker);                   // money split -> normal rounding
      brokerCurrency=sh;
    }
    if(hasCP && d.f){
      let per=shTotal*(100-fee)/100/qty;
-     updated=money(same?per:per/r,sb);
+     updated=round2(same?per:per/r);          // money value written back -> normal rounding
    }
  }
- $('noCP').textContent=money(CASE<=3?listSH:shUnit,sh);
- $('minCP').textContent=money(minCP,sh);
- $('actual').textContent=money(hasCP?cp:shUnit,sh);
- $('shTotal').textContent=money(shTotal,sh);
- $('sky').textContent=d.sky?money(shTotal,sh):'Not created';
- $('broker').textContent=money(broker,brokerCurrency);
- $('feeInvoice').textContent=d.feeInv?money(feeTotal,sh):'Not created';
- $('updated').textContent=updated;
+
+ return {unit,list,qty,conv,fee,fx,sb,sh,same,r,converted,withConv,minCP,listSH,
+         hasCP,cp,shUnit,shTotal,broker,feeTotal,updated,brokerCurrency,d};
+}
+
+function calculate(){
+ const R=computeCase();
+ const d=R.d, sh=R.sh, sb=R.sb;
+
+ $('noCP').textContent=money(CASE<=3?R.listSH:R.shUnit,sh);
+ $('minCP').textContent=money(R.minCP,sh);
+ $('actual').textContent=money(R.hasCP?R.cp:R.shUnit,sh);
+ $('shTotal').textContent=money(R.shTotal,sh);
+ $('sky').textContent=d.sky?money(R.shTotal,sh):'Not created';
+ $('broker').textContent=money(R.broker,R.brokerCurrency);
+ $('feeInvoice').textContent=d.feeInv?money(R.feeTotal,sh):'Not created';
+ $('updated').textContent=(d.f&&R.hasCP&&CASE>3)?money(R.updated,sb):'—';
 
  const caseExpected={
  1:[
@@ -263,96 +301,70 @@ function calculate(){
 };
 $('qaCase').textContent=CASE;
 
-/* Add calculated values to the Expected column */
+/* Add calculated values to the Expected column — reuses the exact same computeCase() result
+   as the Results panel above, so the two can no longer disagree. */
 function expectedWithAmounts(items){
- const unit=n('unit'), list=n('list'), qty=n('qty'), conv=n('conv'), fee=n('fee');
- const sb=$('sb').value, sh=$('sh').value, fx=FX();
- const same=sb===sh, r=rateSBtoSH();
- const converted=unit*r;
- const withConv=converted*(same?1:1+conv/100);
- const minCP=C[CASE].f ? withConv*100/(100-fee) : withConv;
- const listSH=list*fx[sh];
- const cpRaw=$('cp').value.trim(), hasCP=cpRaw!=='', cp=hasCP?ceil2(n('cp')):0;
- let shUnit, shTotal, broker, feeTotal=0, updated='—', brokerCurrency=sb;
-
- if(CASE<=3){
-   shUnit=ceil2(hasCP?cp:listSH);
-   shTotal=invoiceTotalFromUnit(shUnit,qty,sh).total;
-   broker=unit*qty;
-   brokerCurrency=sb;
- }else{
-   shUnit=ceil2(hasCP?cp:withConv*(C[CASE].f?100/(100-fee):1));
-   shTotal=invoiceTotalFromUnit(shUnit,qty,sh).total;
-   if(C[CASE].f){
-     feeTotal=shTotal*fee/100;
-     broker=shTotal*(100-fee)/100;
-     if(!same) broker*=1/r;
-     brokerCurrency=same?sh:sb;
-   }else{
-     broker=hasCP?shTotal:shTotal/(same?1:1+conv/100);
-     brokerCurrency=sh;
-   }
-   if(hasCP && C[CASE].f){
-     const per=shTotal*(100-fee)/100/qty;
-     updated=money(same?per:per/r,sb);
-   }
- }
+ const R=computeCase();
+ const sh=R.sh, sb=R.sb, d=R.d;
 
  return items.map(x=>{
    let v=x[1];
    const name=x[0];
 
    if(name==='StubHub Intl Price (without CP)')
-     v+=' → '+money(CASE<=3?listSH:shUnit,sh);
+     v+=' → '+money(CASE<=3?R.listSH:R.shUnit,sh);
 
    else if(name==='StubHub Intl Price (with CP)')
-     v+=' → '+(hasCP?money(cp,sh):'CP not set');
+     v+=' → '+(R.hasCP?money(R.cp,sh):'CP not set');
 
    else if(name==='Minimum CP')
-     v+=' → '+money(minCP,sh);
+     v+=' → '+money(R.minCP,sh);
 
    else if(name==='SkyBox Invoice Total')
-     v+=(C[CASE].sky?' → '+money(shTotal,sh):'');
+     v+=(d.sky?' → '+money(R.shTotal,sh):'');
 
    else if(name==='Fee Invoice Amount')
-     v+=' → '+money(feeTotal,sh);
+     v+=' → '+money(R.feeTotal,sh);
 
    else if(name==='Broker Invoice Total (without CP)')
-     v+=' → '+money(CASE<=3?unit*qty:(!hasCP?broker:broker),brokerCurrency);
+     v+=' → '+money(R.broker,R.brokerCurrency);
 
    else if(name==='Broker Invoice Total (with CP)')
-     v+=' → '+money(CASE<=3?unit*qty:broker,brokerCurrency);
+     v+=' → '+money(R.broker,R.brokerCurrency);
 
    else if(name==='Update SB Unit Amount after CP sale')
-     v+=(C[CASE].f&&hasCP?' → '+updated:' → —');
+     v+=(d.f&&R.hasCP&&CASE>3?' → '+money(R.updated,sb):' → —');
 
    else if(name==='Broker Invoice')
-     v+=' → '+money(broker,brokerCurrency);
+     v+=' → '+money(R.broker,R.brokerCurrency);
 
    return [name,v];
  }).map(x=>'<tr><td>'+x[0]+'</td><td>'+x[1]+'</td></tr>').join('');
 }
 $('checks').innerHTML=expectedWithAmounts(caseExpected[CASE]||[]);
 
+ {
+ const R=computeCase();
  let lines=[];
- lines.push('Unit amount: '+money(unit,sb));
- lines.push('SB → StubHub rate: '+r.toFixed(6));
- lines.push('Converted unit: '+money(converted,sh));
- if(!same) lines.push('Currency converting: × '+(1+conv/100).toFixed(4)+' = '+money(withConv,sh));
- if(d.f) lines.push('Broker fee gross-up: × 100 / (100 − '+fee+') = '+money(shUnit,sh));
- if(CASE<=3) lines.push('Case '+CASE+': List Price '+money(list,'USD')+' × USD→SH '+fx[sh].toFixed(6)+' = '+money(listSH,sh));
- if(hasCP) lines.push('Custom Price = '+money(cp,sh));
- lines.push('Quantity = '+qty);
- lines.push('StubHub total = '+money(shTotal,sh));
- lines.push('Broker total = '+money(broker,brokerCurrency));
- if(d.f) lines.push('Fee invoice = '+money(shTotal,sh)+' × '+fee+'% = '+money(feeTotal,sh));
+ lines.push('Unit amount: '+money(R.unit,R.sb));
+ lines.push('SB → StubHub rate: '+R.r.toFixed(6));
+ lines.push('Converted unit: '+money(R.converted,R.sh));
+ if(!R.same) lines.push('Currency converting: × '+(1+R.conv/100).toFixed(4)+' = '+money(R.withConv,R.sh));
+ if(R.d.f) lines.push('Broker fee gross-up: × 100 / (100 − '+R.fee+') = '+money(R.shUnit,R.sh));
+ if(CASE<=3) lines.push('Case '+CASE+': List Price '+money(R.list,'USD')+' × USD→SH '+R.fx[R.sh].toFixed(6)+' = '+money(R.listSH,R.sh));
+ if(R.hasCP) lines.push('Custom Price = '+money(R.cp,R.sh));
+ lines.push('Quantity = '+R.qty);
+ lines.push('StubHub total = '+money(R.shTotal,R.sh));
+ lines.push('Broker total = '+money(R.broker,R.brokerCurrency));
+ if(R.d.f) lines.push('Fee invoice = '+money(R.shTotal,R.sh)+' × '+R.fee+'% = '+money(R.feeTotal,R.sh));
  $('calc').textContent=lines.join('\n');
 
  let e=[];
- if(qty<1)e.push('Quantity must be at least 1');
- if(d.f && fee>=100)e.push('Broker Fee must be below 100%');
- if(hasCP&&d.m&&cp<minCP-1e-8)e.push('Custom Price is below minimum');
+ if(R.qty<1)e.push('Quantity must be at least 1');
+ if(R.d.f && R.fee>=100)e.push('Broker Fee must be below 100%');
+ if(R.hasCP&&R.d.m&&R.cp<R.minCP-1e-8)e.push('Custom Price is below minimum');
  $('errors').innerHTML=e.length?'<div class="err">'+e.join('<br>')+'</div>':'';
+ }
 }
 function example(){
  $('unit').value=30000;$('list').value=39870;$('qty').value=2;$('conv').value=2;$('fee').value=3;

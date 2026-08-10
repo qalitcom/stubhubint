@@ -120,15 +120,18 @@ let CASE=1;
 const $=id=>document.getElementById(id);
 const n=id=>Number($(id).value||0);
 const symbols={USD:'$',EUR:'€',GBP:'£',DKK:'kr',SEK:'kr',PLN:'zł'};
-/* Money is always rounded UP to 2 decimal places for StubHub invoice display. */
+const ceil2=x=>Math.ceil((Number(x)-1e-9)*100)/100;
 const money=(x,c)=>{
-  const rounded=Math.ceil((Number(x)-1e-10)*100)/100;
+  const rounded=ceil2(x);
   return symbols[c]+rounded.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 };
+
 function rateSBtoSH(){
  const fx=FX(), sb=$('sb').value, sh=$('sh').value;
  return fx[sh]/fx[sb];
 }
+
+const ceil2=x=>Math.ceil((Number(x)-1e-9)*100)/100;
 
 function invoiceTotalFromUnit(unitPrice, qty, currency){
   // Business rule: round unit selling price UP to 2 decimals BEFORE multiplying by quantity.

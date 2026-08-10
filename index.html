@@ -1,3 +1,124 @@
+
+
+
+c89bebfe-5661-4d6b-ae6e-7d4c043d0d78.png
+83062297-3ce5-49f2-909e-425fd0b77307.png
+6defdc98-d96e-4ddd-a5b1-f01085365253.png
+тестирую кейс 1 . Вот входные данные 
+
+c82b65cd-0947-46e4-8878-5506318b0997.png
+вот list price 
+
+71eb96ac-4b2b-445e-a899-12d13add842d.png
+создал инвойс 
+
+Да. Теперь в Expected автоматически подставляются рассчитанные суммы на основании текущих входных данных и выбранного Case.
+
+Например:
+
+Minimum CP → 103.09 EUR
+
+StubHub Intl Price → 105.26 EUR
+
+SkyBox Invoice Total → 210.52 EUR
+
+Fee Invoice Amount → 6.32 EUR
+
+Broker Invoice Total → 204.20 EUR
+
+Update SB Unit Amount → 99.99 EUR
+
+И при изменении:
+
+Unit Cost
+
+Quantity
+
+валют
+
+курса
+
+Currency converting %
+
+Broker Fee
+
+Custom Price
+
+Case
+
+суммы в Expected пересчитываются автоматически.
+
+Скачать обновлённую программу 
+
+
+
+stubhub_intl_qa_calculator.html
+HTML
+
+
+делай округление типа €69,003.10
+
+Готово. Теперь суммы отображаются в нужном формате:
+
+€69,003.10
+
+Также добавил символы валют:
+
+USD → $69,003.10
+
+EUR → €69,003.10
+
+GBP → £69,003.10
+
+DKK → kr69,003.10
+
+SEK → kr69,003.10
+
+PLN → zł69,003.10
+
+Всегда 2 знака после запятой и разделитель тысяч.
+
+Скачать обновлённую программу 
+
+
+
+stubhub_intl_qa_calculator.html
+HTML
+
+
+StubHub Intl Invoice Total → €69,003.09  а должно округлятца в большую 	StubHub Intl Invoice Total → €69,003.10
+
+Да, понял. Нужно именно округление вверх до 2 знаков, а не обычное математическое округление.
+
+Теперь:
+
+€69,003.091 → €69,003.10
+
+€69,003.0901 → €69,003.10
+
+€69,003.09 → €69,003.09
+
+€69,003.0919 → €69,003.10
+
+То есть используется принцип ceiling до 2 decimal places.
+
+Обновил программу:
+
+Скачать обновлённую версию 
+
+
+
+stubhub_intl_qa_calculator.html
+HTML
+
+
+Library
+/
+stubhub_intl_qa_calculator.html
+
+
+
+
 <!doctype html>
 <html lang="ru">
 <head>
@@ -119,7 +240,12 @@ const C={
 let CASE=1;
 const $=id=>document.getElementById(id);
 const n=id=>Number($(id).value||0);
-const money=(x,c)=>Number(x).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+' '+c;
+const symbols={USD:'$',EUR:'€',GBP:'£',DKK:'kr',SEK:'kr',PLN:'zł'};
+/* Money is always rounded UP to 2 decimal places for StubHub invoice display. */
+const money=(x,c)=>{
+  const rounded=Math.ceil((Number(x)-1e-10)*100)/100;
+  return symbols[c]+rounded.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+};
 function rateSBtoSH(){
  const fx=FX(), sb=$('sb').value, sh=$('sh').value;
  return fx[sh]/fx[sb];

@@ -129,6 +129,13 @@ function rateSBtoSH(){
  const fx=FX(), sb=$('sb').value, sh=$('sh').value;
  return fx[sh]/fx[sb];
 }
+
+function invoiceTotalFromUnit(unitPrice, qty, currency){
+  // Business rule: round unit selling price UP to 2 decimals BEFORE multiplying by quantity.
+  const roundedUnit=ceil2(unitPrice);
+  const total=ceil2(roundedUnit*qty);
+  return {unit:roundedUnit,total:total,currency:currency};
+}
 function selectCase(c){
  CASE=c;
  [...document.querySelectorAll('.case')].forEach(x=>x.classList.toggle('active',+x.dataset.c===c));
@@ -151,8 +158,8 @@ function calculate(){
  const listSH=list*fx[sh];
  let shUnit,shTotal,broker,feeTotal=0,updated='—',brokerCurrency=sb;
  if(CASE<=3){
-   shUnit=listSH;
-   shTotal=(hasCP?cp:shUnit)*qty;
+   shUnit=ceil2(hasCP?cp:listSH);
+   shTotal=invoiceTotalFromUnit(shUnit,qty,sh).total;
    broker=unit*qty; brokerCurrency=sb;
  }else{
    shUnit=hasCP?cp:withConv*(d.f?100/(100-fee):1);
@@ -264,17 +271,17 @@ function expectedWithAmounts(items){
  const withConv=converted*(same?1:1+conv/100);
  const minCP=C[CASE].f ? withConv*100/(100-fee) : withConv;
  const listSH=list*fx[sh];
- const cpRaw=$('cp').value.trim(), hasCP=cpRaw!=='', cp=n('cp');
+ const cpRaw=$('cp').value.trim(), hasCP=cpRaw!=='', cp=hasCP?ceil2(n('cp')):0;
  let shUnit, shTotal, broker, feeTotal=0, updated='—', brokerCurrency=sb;
 
  if(CASE<=3){
-   shUnit=listSH;
-   shTotal=(hasCP?cp:shUnit)*qty;
+   shUnit=ceil2(hasCP?cp:listSH);
+   shTotal=invoiceTotalFromUnit(shUnit,qty,sh).total;
    broker=unit*qty;
    brokerCurrency=sb;
  }else{
-   shUnit=hasCP?cp:withConv*(C[CASE].f?100/(100-fee):1);
-   shTotal=shUnit*qty;
+   shUnit=ceil2(hasCP?cp:withConv*(C[CASE].f?100/(100-fee):1));
+   shTotal=invoiceTotalFromUnit(shUnit,qty,sh).total;
    if(C[CASE].f){
      feeTotal=shTotal*fee/100;
      broker=shTotal*(100-fee)/100;

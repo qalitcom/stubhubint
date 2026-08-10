@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>StubHub Intl QA Calculator</title>
+<style>
+body{margin:0;background:#f4f6f9;color:#172033;font:14px Arial,sans-serif}
+.wrap{max-width:1400px;margin:auto;padding:24px}.card{background:white;border:1px solid #d9dee8;border-radius:14px;padding:18px;margin-bottom:18px}
+h1{margin:0 0 6px}h2{font-size:18px}.muted{color:#667085}
+.grid{display:grid;grid-template-columns:350px 1fr;gap:18px}
+.cases{display:grid;grid-template-columns:repeat(7,1fr);gap:7px}.case{padding:11px 5px;border:1px solid #d9dee8;border-radius:8px;background:white;text-align:center;font-weight:bold;cursor:pointer}.case.active{background:#4f46e5;color:white}
+label{display:block;font-weight:bold;font-size:12px;margin:12px 0 5px}input,select{width:100%;padding:9px;border:1px solid #ccd2dc;border-radius:7px;box-sizing:border-box}.row{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:14px}.badge{padding:5px 8px;border-radius:20px;background:#eef2ff;color:#3730a3;font-size:12px}.off{background:#f2f4f7;color:#475467}
+.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.metric{border:1px solid #d9dee8;border-radius:9px;padding:12px}.k{color:#667085;font-size:12px}.v{font-size:19px;font-weight:bold;margin-top:5px}
+table{width:100%;border-collapse:collapse} #checks td:nth-child(2){font-weight:600}th,td{padding:9px;border-bottom:1px solid #e4e7ec;text-align:left}th{background:#f8fafc}
+button{margin-top:15px;padding:10px 14px;border:0;border-radius:7px;background:#4f46e5;color:white;font-weight:bold;cursor:pointer}.secondary{background:#475467}
+pre{white-space:pre-wrap;background:#101828;color:#e5e7eb;padding:12px;border-radius:8px}.ok{color:#087443;font-weight:bold}.warn{color:#9a6700;font-weight:bold}.err{color:#b42318;margin-top:8px}
+@media(max-width:950px){.grid{grid-template-columns:1fr}.cases{grid-template-columns:repeat(4,1fr)}.metrics{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>StubHub International — QA Pricing & Invoice Tool</h1>
+<div class="muted">7 кейсов из требований: валюты, Currency converting %, Broker Fee, Custom Price и инвойсы.</div>
+
+<div class="card">
+<h2>Case</h2><div id="cases" class="cases"></div><div id="badges" class="badges"></div>
+</div>
+
+<div class="grid">
+<div class="card">
+<h2>Input</h2>
+<label>Unit Cost / Unit Amount (SB currency)</label><input id="unit" type="number" step="0.01" value="30000">
+<label>List Price (USD)</label><input id="list" type="number" step="0.01" value="39870">
+<div class="row">
+<div><label>Quantity</label><input id="qty" type="number" min="1" value="2"></div>
+<div><label>Currency converting %</label><input id="conv" type="number" step="0.01" value="2"></div>
+</div>
+<div class="row">
+<div><label>SB Currency</label><select id="sb"><option selected>EUR</option><option>USD</option><option>GBP</option><option>DKK</option><option>SEK</option><option>PLN</option></select></div>
+<div><label>StubHub Intl Currency</label><select id="sh"><option selected>EUR</option><option>USD</option><option>GBP</option><option>DKK</option><option>SEK</option><option>PLN</option></select></div>
+</div>
+
+<label>Exchange rates from USD</label>
+<div class="row">
+<div><label>USD → USD</label><input id="rateUSD" type="number" step="0.000001" value="1"></div>
+<div><label>USD → EUR</label><input id="rateEUR" type="number" step="0.000001" value="0.865351"></div>
+</div>
+<div class="row">
+<div><label>USD → GBP</label><input id="rateGBP" type="number" step="0.000001" value="0.741284"></div>
+<div><label>USD → DKK</label><input id="rateDKK" type="number" step="0.000001" value="6.45"></div>
+</div>
+<div class="row">
+<div><label>USD → SEK</label><input id="rateSEK" type="number" step="0.000001" value="9.35"></div>
+<div><label>USD → PLN</label><input id="ratePLN" type="number" step="0.000001" value="3.66"></div>
+</div>
+<div class="muted" style="font-size:12px;margin-top:6px">
+Все расчёты конвертации используют введённые здесь курсы. Например: 1 USD = 0.865351 EUR.
+</div>
+<label>Broker Fee %</label><input id="fee" type="number" min="0" max="99.99" step="0.01" value="3">
+<label>Custom Price (StubHub Intl currency)</label><input id="cp" type="number" min="0" step="0.01" placeholder="empty = no CP">
+<button onclick="example()">Load current example</button>
+<button class="secondary" onclick="resetAll()">Reset</button>
+<div id="errors"></div>
+</div>
+
+<div>
+<div class="card">
+<h2>Results</h2>
+<div class="metrics">
+<div class="metric"><div class="k">StubHub Price without CP</div><div class="v" id="noCP">—</div></div>
+<div class="metric"><div class="k">Minimum CP</div><div class="v" id="minCP">—</div></div>
+<div class="metric"><div class="k">Actual StubHub Price</div><div class="v" id="actual">—</div></div>
+</div>
+<table style="margin-top:14px">
+<tr><th>StubHub / Invoice Total</th><td id="shTotal">—</td></tr>
+<tr><th>SkyBox Invoice</th><td id="sky">—</td></tr>
+<tr><th>Broker Invoice</th><td id="broker">—</td></tr>
+<tr><th>Broker Portal Fee Invoice</th><td id="feeInvoice">—</td></tr>
+<tr><th>SB Unit Amount after CP sale</th><td id="updated">—</td></tr>
+</table>
+</div>
+
+<div class="card">
+<h2>QA checks — Case <span id="qaCase">1</span></h2>
+<table>
+<thead><tr><th>Parameter</th><th>Expected</th></tr></thead>
+<tbody id="checks"></tbody>
+</table>
+</div>
+
+<div class="card"><h2>Calculation</h2><pre id="calc">—</pre></div>
+
+</div>
+</div>
+</div>
+
+<script>
+function FX(){
+ return {
+  USD:Number($("rateUSD").value||0),
+  EUR:Number($("rateEUR").value||0),
+  GBP:Number($("rateGBP").value||0),
+  DKK:Number($("rateDKK").value||0),
+  SEK:Number($("rateSEK").value||0),
+  PLN:Number($("ratePLN").value||0)
+ };
+}
+const C={
+1:{i:0,a:0,m:0,f:0,sky:1,feeInv:0},
+2:{i:1,a:0,m:0,f:0,sky:1,feeInv:0},
+3:{i:1,a:1,m:0,f:0,sky:1,feeInv:0},
+4:{i:1,a:1,m:1,f:1,sky:0,feeInv:1},
+5:{i:1,a:0,m:1,f:1,sky:1,feeInv:1},
+6:{i:1,a:1,m:1,f:1,sky:1,feeInv:1},
+7:{i:1,a:0,m:1,f:0,sky:0,feeInv:1}
+};
+let CASE=1;
+const $=id=>document.getElementById(id);
+const n=id=>Number($(id).value||0);
+const money=(x,c)=>Number(x).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+' '+c;
+function rateSBtoSH(){
+ const fx=FX(), sb=$('sb').value, sh=$('sh').value;
+ return fx[sh]/fx[sb];
+}
+function selectCase(c){
+ CASE=c;
+ [...document.querySelectorAll('.case')].forEach(x=>x.classList.toggle('active',+x.dataset.c===c));
+ const d=C[c];
+ $('badges').innerHTML=[
+ 'Integration '+(d.i?'ON':'OFF'),
+ 'API key '+(d.a?'YES':'NO'),
+ 'Manage listings '+(d.m?'YES':'NO'),
+ 'Broker fee '+(d.f?'YES':'NO'),
+ 'SkyBox Invoice '+(d.sky?'YES':'NO')
+ ].map(t=>'<span class="badge '+(t.includes('NO')||t.includes('OFF')?'off':'')+'">'+t+'</span>').join('');
+ calculate();
+}
+function calculate(){
+ const d=C[CASE], unit=n('unit'), list=n('list'), qty=n('qty'), conv=n('conv'), fee=n('fee');
+ const fx=FX();
+ const sb=$('sb').value, sh=$('sh').value, same=sb===sh, cpRaw=$('cp').value.trim(), hasCP=cpRaw!=='', cp=n('cp');
+ const r=rateSBtoSH(), converted=unit*r, withConv=converted*(same?1:1+conv/100);
+ const minCP=d.f?withConv*100/(100-fee):withConv;
+ const listSH=list*fx[sh];
+ let shUnit,shTotal,broker,feeTotal=0,updated='—',brokerCurrency=sb;
+ if(CASE<=3){
+   shUnit=listSH;
+   shTotal=(hasCP?cp:shUnit)*qty;
+   broker=unit*qty; brokerCurrency=sb;
+ }else{
+   shUnit=hasCP?cp:withConv*(d.f?100/(100-fee):1);
+   shTotal=shUnit*qty;
+   if(d.f){
+     feeTotal=shTotal*fee/100;
+     broker=shTotal*(100-fee)/100;
+     if(!same) broker*=1/r; // convert SH -> SB
+     brokerCurrency=same?sh:sb;
+   }else{
+     broker=hasCP?shTotal:shTotal/(same?1:1+conv/100);
+     brokerCurrency=sh;
+   }
+   if(hasCP && d.f){
+     let per=shTotal*(100-fee)/100/qty;
+     updated=money(same?per:per/r,sb);
+   }
+ }
+ $('noCP').textContent=money(CASE<=3?listSH:shUnit,sh);
+ $('minCP').textContent=money(minCP,sh);
+ $('actual').textContent=money(hasCP?cp:shUnit,sh);
+ $('shTotal').textContent=money(shTotal,sh);
+ $('sky').textContent=d.sky?money(shTotal,sh):'Not created';
+ $('broker').textContent=money(broker,brokerCurrency);
+ $('feeInvoice').textContent=d.feeInv?money(feeTotal,sh):'Not created';
+ $('updated').textContent=updated;
+
+ const caseExpected={
+ 1:[
+  ['Integration','OFF'],['Can add API keys','NO'],['Can manage listings','NO'],
+  ['StubHub Intl Price (without CP)','List Price converted from USD to StubHub Intl currency'],
+  ['StubHub Intl Price (with CP)','Custom Price'],['Minimum CP','Unit amount converted to StubHub Intl currency'],
+  ['Admin / SkyBox Invoice','CREATED'],['SkyBox Invoice Total','StubHub Intl Invoice Total'],
+  ['Broker Invoice','CREATED'],['Broker Portal Fee Invoice','NOT CREATED'],
+  ['Broker Invoice Total (without CP)','Unit cost × Quantity (SB currency)'],
+  ['Broker Invoice Total (with CP)','Unit cost × Quantity (SB currency)'],['Update SB Unit Amount after CP sale','NO']
+ ],
+ 2:[
+  ['Integration','ON'],['Can add API keys','NO'],['Can manage listings','NO'],
+  ['StubHub Intl Price (without CP)','List Price converted from USD to StubHub Intl currency'],
+  ['StubHub Intl Price (with CP)','Custom Price'],['Minimum CP','Unit amount converted to StubHub Intl currency'],
+  ['Admin / SkyBox Invoice','CREATED'],['SkyBox Invoice Total','StubHub Intl Invoice Total'],
+  ['Broker Invoice','CREATED'],['Broker Portal Fee Invoice','NOT CREATED'],
+  ['Broker Invoice Total (without CP)','Unit cost × Quantity (SB currency)'],
+  ['Broker Invoice Total (with CP)','Unit cost × Quantity (SB currency)'],['Update SB Unit Amount after CP sale','NO']
+ ],
+ 3:[
+  ['Integration','ON'],['Can add API keys','YES'],['Can manage listings','NO'],
+  ['StubHub Intl Price (without CP)','List Price converted from USD to StubHub Intl currency'],
+  ['StubHub Intl Price (with CP)','Custom Price'],['Minimum CP','Unit amount converted to StubHub Intl currency'],
+  ['Admin / SkyBox Invoice','CREATED'],['SkyBox Invoice Total','StubHub Intl Invoice Total'],
+  ['Broker Invoice','CREATED'],['Broker Portal Fee Invoice','NOT CREATED'],
+  ['Broker Invoice Total (without CP)','Unit cost × Quantity (SB currency)'],
+  ['Broker Invoice Total (with CP)','Unit cost × Quantity (SB currency)'],['Update SB Unit Amount after CP sale','NO']
+ ],
+ 4:[
+  ['Integration','ON'],['Can add API keys','YES'],['Can manage listings','NO'],['Has API key','YES'],
+  ['StubHub Intl Price (without CP)','Unit amount converted to StubHub Intl currency + Currency converting %'],
+  ['StubHub Intl Price (with CP)','Custom Price'],['Minimum CP','Converted Unit amount + Currency converting %'],
+  ['Admin / SkyBox Invoice','NOT CREATED'],['SkyBox Invoice Total','—'],
+  ['Broker Invoice','CREATED'],['Broker Portal Fee Invoice','CREATED'],
+  ['Fee Invoice Amount','StubHub Intl Invoice Total × Broker fee / 100'],
+  ['Broker Invoice Total (without CP)','Remove Currency converting % if currencies differ; keep StubHub Intl currency'],
+  ['Broker Invoice Total (with CP)','StubHub Intl Invoice Total'],['Update SB Unit Amount after CP sale','NO']
+ ],
+ 5:[
+  ['Integration','ON'],['Can add API keys','NO'],['Can manage listings','YES'],['Has API key','NO'],
+  ['StubHub Intl Price (without CP)','Converted Unit amount + Currency converting %, then × 100 / (100 − Broker fee)'],
+  ['StubHub Intl Price (with CP)','Custom Price'],
+  ['Minimum CP','Converted Unit amount + Currency converting %, then × 100 / (100 − Broker fee)'],
+  ['Admin / SkyBox Invoice','CREATED'],['SkyBox Invoice Total','StubHub Intl Invoice Total'],
+  ['Broker Invoice','CREATED'],['Broker Portal Fee Invoice','CREATED'],
+  ['Fee Invoice Amount','StubHub Intl Invoice Total × Broker fee / 100'],
+  ['Broker Invoice Total (without CP)','Remove Broker fee; remove Currency converting % if currencies differ; convert back to SB'],
+  ['Broker Invoice Total (with CP)','StubHub Intl Invoice Total × (100 − Broker fee) / 100'],
+  ['Update SB Unit Amount after CP sale','YES']
+ ],
+ 6:[
+  ['Integration','ON'],['Can add API keys','YES'],['Can manage listings','YES'],['Has API key','NO'],
+  ['StubHub Intl Price (without CP)','Converted Unit amount + Currency converting %, then × 100 / (100 − Broker fee)'],
+  ['StubHub Intl Price (with CP)','Custom Price'],
+  ['Minimum CP','Converted Unit amount + Currency converting %, then × 100 / (100 − Broker fee)'],
+  ['Admin / SkyBox Invoice','CREATED'],['SkyBox Invoice Total','StubHub Intl Invoice Total'],
+  ['Broker Invoice','CREATED'],['Broker Portal Fee Invoice','CREATED'],
+  ['Fee Invoice Amount','StubHub Intl Invoice Total × Broker fee / 100'],
+  ['Broker Invoice Total (without CP)','Remove Broker fee; remove Currency converting % if currencies differ; convert back to SB'],
+  ['Broker Invoice Total (with CP)','StubHub Intl Invoice Total × (100 − Broker fee) / 100'],
+  ['Update SB Unit Amount after CP sale','YES']
+ ],
+ 7:[
+  ['Integration','ON'],['Can add API keys','YES'],['Can manage listings','YES'],['Has API key','YES'],
+  ['StubHub Intl Price (without CP)','Converted Unit amount + Currency converting % if currencies differ'],
+  ['StubHub Intl Price (with CP)','Custom Price'],['Minimum CP','Converted Unit amount + Currency converting % if currencies differ'],
+  ['Admin / SkyBox Invoice','NOT CREATED'],['SkyBox Invoice Total','—'],
+  ['Broker Invoice','CREATED'],['Broker Portal Fee Invoice','CREATED'],
+  ['Fee Invoice Amount','StubHub Intl Invoice Total × Broker fee / 100'],
+  ['Broker Invoice Total (without CP)','Remove Currency converting % if currencies differ; keep StubHub Intl currency'],
+  ['Broker Invoice Total (with CP)','StubHub Intl Invoice Total'],['Update SB Unit Amount after CP sale','NO']
+ ]
+};
+$('qaCase').textContent=CASE;
+
+/* Add calculated values to the Expected column */
+function expectedWithAmounts(items){
+ const unit=n('unit'), list=n('list'), qty=n('qty'), conv=n('conv'), fee=n('fee');
+ const sb=$('sb').value, sh=$('sh').value, fx=FX();
+ const same=sb===sh, r=rateSBtoSH();
+ const converted=unit*r;
+ const withConv=converted*(same?1:1+conv/100);
+ const minCP=C[CASE].f ? withConv*100/(100-fee) : withConv;
+ const listSH=list*fx[sh];
+ const cpRaw=$('cp').value.trim(), hasCP=cpRaw!=='', cp=n('cp');
+ let shUnit, shTotal, broker, feeTotal=0, updated='—', brokerCurrency=sb;
+
+ if(CASE<=3){
+   shUnit=listSH;
+   shTotal=(hasCP?cp:shUnit)*qty;
+   broker=unit*qty;
+   brokerCurrency=sb;
+ }else{
+   shUnit=hasCP?cp:withConv*(C[CASE].f?100/(100-fee):1);
+   shTotal=shUnit*qty;
+   if(C[CASE].f){
+     feeTotal=shTotal*fee/100;
+     broker=shTotal*(100-fee)/100;
+     if(!same) broker*=1/r;
+     brokerCurrency=same?sh:sb;
+   }else{
+     broker=hasCP?shTotal:shTotal/(same?1:1+conv/100);
+     brokerCurrency=sh;
+   }
+   if(hasCP && C[CASE].f){
+     const per=shTotal*(100-fee)/100/qty;
+     updated=money(same?per:per/r,sb);
+   }
+ }
+
+ return items.map(x=>{
+   let v=x[1];
+   const name=x[0];
+
+   if(name==='StubHub Intl Price (without CP)')
+     v+=' → '+money(CASE<=3?listSH:shUnit,sh);
+
+   else if(name==='StubHub Intl Price (with CP)')
+     v+=' → '+(hasCP?money(cp,sh):'CP not set');
+
+   else if(name==='Minimum CP')
+     v+=' → '+money(minCP,sh);
+
+   else if(name==='SkyBox Invoice Total')
+     v+=(C[CASE].sky?' → '+money(shTotal,sh):'');
+
+   else if(name==='Fee Invoice Amount')
+     v+=' → '+money(feeTotal,sh);
+
+   else if(name==='Broker Invoice Total (without CP)')
+     v+=' → '+money(CASE<=3?unit*qty:(!hasCP?broker:broker),brokerCurrency);
+
+   else if(name==='Broker Invoice Total (with CP)')
+     v+=' → '+money(CASE<=3?unit*qty:broker,brokerCurrency);
+
+   else if(name==='Update SB Unit Amount after CP sale')
+     v+=(C[CASE].f&&hasCP?' → '+updated:' → —');
+
+   else if(name==='Broker Invoice')
+     v+=' → '+money(broker,brokerCurrency);
+
+   return [name,v];
+ }).map(x=>'<tr><td>'+x[0]+'</td><td>'+x[1]+'</td></tr>').join('');
+}
+$('checks').innerHTML=expectedWithAmounts(caseExpected[CASE]||[]);
+
+ let lines=[];
+ lines.push('Unit amount: '+money(unit,sb));
+ lines.push('SB → StubHub rate: '+r.toFixed(6));
+ lines.push('Converted unit: '+money(converted,sh));
+ if(!same) lines.push('Currency converting: × '+(1+conv/100).toFixed(4)+' = '+money(withConv,sh));
+ if(d.f) lines.push('Broker fee gross-up: × 100 / (100 − '+fee+') = '+money(shUnit,sh));
+ if(CASE<=3) lines.push('Case '+CASE+': List Price '+money(list,'USD')+' × USD→SH '+fx[sh].toFixed(6)+' = '+money(listSH,sh));
+ if(hasCP) lines.push('Custom Price = '+money(cp,sh));
+ lines.push('Quantity = '+qty);
+ lines.push('StubHub total = '+money(shTotal,sh));
+ lines.push('Broker total = '+money(broker,brokerCurrency));
+ if(d.f) lines.push('Fee invoice = '+money(shTotal,sh)+' × '+fee+'% = '+money(feeTotal,sh));
+ $('calc').textContent=lines.join('\n');
+
+ let e=[];
+ if(qty<1)e.push('Quantity must be at least 1');
+ if(d.f && fee>=100)e.push('Broker Fee must be below 100%');
+ if(hasCP&&d.m&&cp<minCP-1e-8)e.push('Custom Price is below minimum');
+ $('errors').innerHTML=e.length?'<div class="err">'+e.join('<br>')+'</div>':'';
+}
+function example(){
+ $('unit').value=30000;$('list').value=39870;$('qty').value=2;$('conv').value=2;$('fee').value=3;
+ $('sb').value='EUR';$('sh').value='EUR';$('cp').value='';
+ $('rateUSD').value='1';$('rateEUR').value='0.865351';$('rateGBP').value='0.741284';
+ $('rateDKK').value='6.45';$('rateSEK').value='9.35';$('ratePLN').value='3.66';calculate();
+}
+function resetAll(){example();selectCase(1)}
+for(let id of ['unit','list','qty','conv','fee','cp','sb','sh','rateUSD','rateEUR','rateGBP','rateDKK','rateSEK','ratePLN'])$(id).addEventListener('input',calculate);
+for(let id of ['sb','sh'])$(id).addEventListener('change',calculate);
+let cg=$('cases');for(let i=1;i<=7;i++){let x=document.createElement('div');x.className='case';x.dataset.c=i;x.textContent='Case '+i;x.onclick=()=>selectCase(i);cg.appendChild(x)}
+selectCase(1);
+</script>
+</body></html>

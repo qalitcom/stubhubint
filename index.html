@@ -108,13 +108,13 @@ function FX(){
  };
 }
 const C={
-1:{i:0,a:0,m:0,f:0,sky:1,feeInv:0},
-2:{i:1,a:0,m:0,f:0,sky:1,feeInv:0},
-3:{i:1,a:1,m:0,f:0,sky:1,feeInv:0},
-4:{i:1,a:1,m:1,f:1,sky:0,feeInv:1},
-5:{i:1,a:0,m:1,f:1,sky:1,feeInv:1},
-6:{i:1,a:1,m:1,f:1,sky:1,feeInv:1},
-7:{i:1,a:0,m:1,f:0,sky:0,feeInv:1}
+1:{i:0,a:0,m:0,grossUp:0,sky:1,feeInv:0},
+2:{i:1,a:0,m:0,grossUp:0,sky:1,feeInv:0},
+3:{i:1,a:1,m:0,grossUp:0,sky:1,feeInv:0},
+4:{i:1,a:1,m:0,grossUp:0,sky:0,feeInv:1},
+5:{i:1,a:0,m:1,grossUp:1,sky:1,feeInv:1},
+6:{i:1,a:1,m:1,grossUp:1,sky:1,feeInv:1},
+7:{i:1,a:0,m:1,grossUp:0,sky:0,feeInv:1}
 };
 let CASE=1;
 const $=id=>document.getElementById(id);
@@ -156,7 +156,7 @@ function selectCase(c){
  'Integration '+(d.i?'ON':'OFF'),
  'API key '+(d.a?'YES':'NO'),
  'Manage listings '+(d.m?'YES':'NO'),
- 'Broker fee '+(d.f?'YES':'NO'),
+ 'Broker Portal Fee Invoice '+(d.feeInv?'YES':'NO'),
  'SkyBox Invoice '+(d.sky?'YES':'NO')
  ].map(t=>'<span class="badge '+(t.includes('NO')||t.includes('OFF')?'off':'')+'">'+t+'</span>').join('');
  calculate();
@@ -174,9 +174,8 @@ function computeCase(){
  const converted=unit*r;
  const withConv=converted*(same?1:1+conv/100);
  // Minimum CP: per the spec's own worked example (Unit=100, fee=3% -> 103.09, NOT 103.10),
- // this uses NORMAL rounding, in every case (it's the same fee-gross-up formula as the
- // "StubHub Intl Price without CP" row in cases 4-7, so it must round the same way).
- const minCP=round2(d.f?withConv*100/(100-fee):withConv);
+ // this uses NORMAL rounding. Fee only enters this formula for cases 5/6 (grossUp).
+ const minCP=round2(d.grossUp?withConv*100/(100-fee):withConv);
  // List price converted to StubHub Intl currency (cases 1-3 ONLY) is a different formula,
  // confirmed by the user's own real example to round UP (List 39870 USD -> total 69,003.10,
  // not 69,003.08/.09).
@@ -190,20 +189,38 @@ function computeCase(){
    broker=round2(unit*qty);              // money actually owed to broker -> normal rounding
    brokerCurrency=sb;
  }else{
-   shUnit=hasCP?cp:round2(withConv*(d.f?100/(100-fee):1)); // fee-gross-up price -> NORMAL rounding (matches spec's 103.09 example)
-   shTotal=round2(shUnit*qty);                                // total sale price -> NORMAL rounding
-   if(d.f){
-     feeTotal=round2(shTotal*fee/100);        // money split -> normal rounding
-     broker=shTotal*(100-fee)/100;
-     if(!same) broker=broker/r;               // convert SH -> SB
-     broker=round2(broker);                   // money split -> normal rounding
-     brokerCurrency=same?sh:sb;
+   // Price gross-up by Broker fee happens ONLY for cases 5/6 (grossUp). Cases 4/7 price
+   // is just the converted Unit amount (+ conv% if currencies differ) -- fee is billed
+   // separately via the Fee Invoice, never baked into the sale price.
+   shUnit=hasCP?cp:round2(withConv*(d.grossUp?100/(100-fee):1));
+   shTotal=round2(shUnit*qty);
+
+   // Fee Invoice exists for any case with feeInv (4,5,6,7), independent of whether the
+   // fee is netted out of the broker payout or billed separately.
+   if(d.feeInv) feeTotal=round2(shTotal*fee/100);
+
+   if(d.grossUp){
+     // Cases 5/6: fee is NETTED out of the broker payout.
+     if(hasCP){
+       // Broker Invoice Total (с CP): StubHub Intl Invoice Total × (100-fee)/100, stays in StubHub Intl currency.
+       broker=round2(shTotal*(100-fee)/100);
+       brokerCurrency=sh;
+     }else{
+       // Broker Invoice Total (без CP): remove fee, remove conv% if currencies differ, convert back to SB.
+       let afterFee=shTotal*(100-fee)/100;
+       let afterConv=same?afterFee:afterFee/(1+conv/100);
+       let backToSB=same?afterConv:afterConv/r;
+       broker=round2(backToSB);
+       brokerCurrency=sb;
+     }
    }else{
+     // Cases 4/7: fee is billed separately (Fee Invoice), NOT subtracted from the broker.
+     // Broker keeps the full total, only currency-converting % is removed if applicable.
      broker=hasCP?shTotal:shTotal/(same?1:1+conv/100);
-     broker=round2(broker);                   // money split -> normal rounding
+     broker=round2(broker);
      brokerCurrency=sh;
    }
-   if(hasCP && d.f){
+   if(hasCP && d.grossUp){
      let per=shTotal*(100-fee)/100/qty;
      updated=round2(same?per:per/r);          // money value written back -> normal rounding
    }
@@ -224,7 +241,7 @@ function calculate(){
  $('sky').textContent=d.sky?money(R.shTotal,sh):'Not created';
  $('broker').textContent=money(R.broker,R.brokerCurrency);
  $('feeInvoice').textContent=d.feeInv?money(R.feeTotal,sh):'Not created';
- $('updated').textContent=(d.f&&R.hasCP&&CASE>3)?money(R.updated,sb):'—';
+ $('updated').textContent=(d.grossUp&&R.hasCP&&CASE>3)?money(R.updated,sb):'—';
 
  const caseExpected={
  1:[
@@ -333,7 +350,7 @@ function expectedWithAmounts(items){
      v+=' → '+money(R.broker,R.brokerCurrency);
 
    else if(name==='Update SB Unit Amount after CP sale')
-     v+=(d.f&&R.hasCP&&CASE>3?' → '+money(R.updated,sb):' → —');
+     v+=(d.grossUp&&R.hasCP&&CASE>3?' → '+money(R.updated,sb):' → —');
 
    else if(name==='Broker Invoice')
      v+=' → '+money(R.broker,R.brokerCurrency);
@@ -350,18 +367,18 @@ $('checks').innerHTML=expectedWithAmounts(caseExpected[CASE]||[]);
  lines.push('SB → StubHub rate: '+R.r.toFixed(6));
  lines.push('Converted unit: '+money(R.converted,R.sh));
  if(!R.same) lines.push('Currency converting: × '+(1+R.conv/100).toFixed(4)+' = '+money(R.withConv,R.sh));
- if(R.d.f) lines.push('Broker fee gross-up: × 100 / (100 − '+R.fee+') = '+money(R.shUnit,R.sh));
+ if(R.d.grossUp) lines.push('Broker fee gross-up: × 100 / (100 − '+R.fee+') = '+money(R.shUnit,R.sh));
  if(CASE<=3) lines.push('Case '+CASE+': List Price '+money(R.list,'USD')+' × USD→SH '+R.fx[R.sh].toFixed(6)+' = '+money(R.listSH,R.sh));
  if(R.hasCP) lines.push('Custom Price = '+money(R.cp,R.sh));
  lines.push('Quantity = '+R.qty);
  lines.push('StubHub total = '+money(R.shTotal,R.sh));
  lines.push('Broker total = '+money(R.broker,R.brokerCurrency));
- if(R.d.f) lines.push('Fee invoice = '+money(R.shTotal,R.sh)+' × '+R.fee+'% = '+money(R.feeTotal,R.sh));
+ if(R.d.feeInv) lines.push('Fee invoice = '+money(R.shTotal,R.sh)+' × '+R.fee+'% = '+money(R.feeTotal,R.sh));
  $('calc').textContent=lines.join('\n');
 
  let e=[];
  if(R.qty<1)e.push('Quantity must be at least 1');
- if(R.d.f && R.fee>=100)e.push('Broker Fee must be below 100%');
+ if(R.d.feeInv && R.fee>=100)e.push('Broker Fee must be below 100%');
  if(R.hasCP&&R.d.m&&R.cp<R.minCP-1e-8)e.push('Custom Price is below minimum');
  $('errors').innerHTML=e.length?'<div class="err">'+e.join('<br>')+'</div>':'';
  }
